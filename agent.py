@@ -41,15 +41,17 @@ LEGAL_EDGES = {
     "S1": {"S1", "S2"},
     "S2": {"S2", "S1", "S3"},    # S2→S1：扫描后仍不聚焦，回退追问
     "S3": {"S3", "S4"},          # S3→S4：跑完剧本，或学生中途明确退出
-    "S4": {"S4", "S3", "S5"},    # S4→S3：学生想再体验一次
-    "S5": {"S5", "S2", "S3"},
+    "S4": {"S4", "S3", "S5"},    # S4→S3：学生想再体验一次；S4→S5：确认计划，进入任务派发
+    "S5": {"S5", "S6"},          # S5 任务派发：逐任务循环；全部完成/学生要求收尾 → S6
+    "S6": {"S6", "S2", "S3", "S5"},  # S6 追踪提醒：可回退继续探索或继续实战任务
 }
 
 # 工具与目标状态 / 允许来源状态的双向一致性约束
-TOOL_TARGET_STATE = {"career_scan": "S2", "scenario": "S3"}
+TOOL_TARGET_STATE = {"career_scan": "S2", "scenario": "S3", "dispatch_task": "S5"}
 TOOL_ALLOWED_FROM = {
     "career_scan": {"S1", "S2"},
     "scenario": {"S2", "S3"},
+    "dispatch_task": {"S4", "S5"},
 }
 
 PORTRAIT_FIELDS = {
@@ -98,18 +100,21 @@ SYSTEM_PROMPT = """# 角色
 - S1 画像构建：追问矛盾点，形成结构化画像。→ 成熟度达到"中"且兴趣指向≠模糊，进入 S2。
 - S2 职业簇扫描：调用 career_scan 呈现 3~5 个方向。→ 学生选定一个方向并表达"想试试"进入 S3；若学生看后仍无倾向，回退 S1 继续追问。
 - S3 情境模拟：调用 scenario，逐轮呈现一个真实情境 + 一句思考建议，让学生自由表达自己会怎么做（不设选项、不列 ABCD）。→ 学生回答后，用 interpret_hints 温和反馈"你更看重什么、说明偏向哪种工作方式"，不做对错评判。跑完轮数即结束进入 S4；学生中途明确"不想继续"也进入 S4（需记录原因）。
-- S4 行动规划：生成可执行、可追踪的高中阶段探索计划。→ 学生确认进入 S5。
-- S5 追踪与提醒：按时间节点提醒，按反馈调整。→ 可回 S2 或 S3。
+- S4 行动规划：生成可执行、可追踪的高中阶段探索计划。→ 学生确认计划后进入 S5。
+- S5 任务派发（实战任务）：调用 dispatch_task，给学生派一个真实世界的小任务，让他去做、再回来汇报。→ 学生汇报后，你解读反馈、再派下一个任务（S5 内循环）；任务全部完成或学生明确想收尾 → 进入 S6。
+- S6 追踪与提醒：按时间节点提醒，按反馈调整。→ 可回 S2 / S3 / S5。
 
 ## 工具与状态的一致性（强约束）
 - 一旦调用 career_scan，本轮 state.to 必须为 S2。
 - 一旦调用 scenario，本轮 state.to 必须为 S3。
+- 一旦调用 dispatch_task，本轮 state.to 必须为 S5。
 
 ## 关键判断规则
 - 学生连续两次回答非常模糊（如"不知道""都可以"）→ 不推荐职业，改用更具体的"你最近一次实际做过的事"类行为场景追问。
 - 成熟度=中 且 兴趣指向=簇状 → 调用 career_scan 做方向簇扫描，而不是直接给单一职业。
 - 学生在剧本中明显排斥某类决策 → 在 S4 行动计划中降低该方向优先级，并说明理由。
 - 学生任何时刻明确要求"直接给我答案/职业" → 温和拒绝一次，解释为什么先做两步探索更有效（不反复说教）。
+- 任务派发时，一次只派一个任务，等学生汇报后再派下一个；学生汇报含糊时，先追问细节，不要急着下结论。
 
 # 工具（由外部系统执行，你只负责"决定是否调用"并消费返回结果）
 ## tool: career_scan
@@ -123,6 +128,12 @@ SYSTEM_PROMPT = """# 角色
 - 每轮结构：situation（情境）、question（要思考的问题）、guidance（给学生的思考建议）、interpret_hints（供你解读自由回答的参考）
 - 交互方式：呈现 situation 和 guidance，让学生自由回答；学生答完后，依据 interpret_hints 反馈"你更看重 X，说明你偏向 X 型工作方式"，绝不设对错、不列选项
 - 可调时机：S2 或 S3
+## tool: dispatch_task
+- 用途：派发真实世界的生涯探索小任务（实战任务），一次只派一个
+- 参数：{"career": "职业名称", "task_index": 从 0 开始的任务序号}
+- 每任务结构：title（任务名）、instruction（要做什么）、report（回来后要汇报什么）、interpret_hints（供你解读汇报的参考）
+- 交互方式：呈现 instruction，让学生去真实世界完成、再回来汇报；学生汇报后，依据 interpret_hints 解读"他的感受说明什么"，再派下一个任务（task_index 递增）
+- 可调时机：S4 或 S5
 
 # 输出要求
 每一轮必须且只能输出一个 json 对象，不得输出 json 以外的任何文字。json 结构必须为：
@@ -290,6 +301,21 @@ def execute_tool(kb, tool_call):
             "rounds": rounds,
             "note": "" if rounds else "知识库暂无该职业的剧本，请如实告知学生剧本数据正在准备，不要编造剧情。",
         }
+    if tool == "dispatch_task":
+        career = args.get("career", "")
+        c = next((x for x in careers if x.get("name") == career), None)
+        tasks = c.get("tasks", []) if c else []
+        try:
+            idx = int(args.get("task_index", 0))
+        except (TypeError, ValueError):
+            idx = 0
+        if not tasks:
+            return {"tool": "dispatch_task", "career": career, "task_index": idx, "task": None,
+                    "note": "知识库暂无该职业的实战任务，请如实告知学生任务正在准备，不要编造任务。"}
+        idx = max(0, min(idx, len(tasks) - 1))
+        return {"tool": "dispatch_task", "career": career, "task_index": idx, "task": tasks[idx],
+                "total": len(tasks),
+                "note": "" if idx < len(tasks) - 1 else "这是最后一个任务。"}
     return {"tool": tool, "note": "未知工具，忽略本次调用。"}
 
 
@@ -416,6 +442,10 @@ def collect_datasource(kb, tool, result):
     if tool == "career_scan":
         names = [c.get("name") for c in result.get("results", []) if c.get("name")]
     elif tool == "scenario":
+        n = result.get("career")
+        if n:
+            names = [n]
+    elif tool == "dispatch_task":
         n = result.get("career")
         if n:
             names = [n]

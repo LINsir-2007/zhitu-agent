@@ -145,7 +145,8 @@
       <div class="step" data-state="S2"><span class="dot">3</span><span class="lbl">扫描</span></div>
       <div class="step" data-state="S3"><span class="dot">4</span><span class="lbl">模拟</span></div>
       <div class="step" data-state="S4"><span class="dot">5</span><span class="lbl">规划</span></div>
-      <div class="step" data-state="S5"><span class="dot">6</span><span class="lbl">追踪</span></div>
+      <div class="step" data-state="S5"><span class="dot">6</span><span class="lbl">实战</span></div>
+      <div class="step" data-state="S6"><span class="dot">7</span><span class="lbl">追踪</span></div>
     </div>
     <div class="badges">
       <div class="badge">画像成熟度<b id="statMaturity">低</b></div>
@@ -180,7 +181,8 @@
   </footer>
 
   <script>
-    const STATE_ORDER = ["S0", "S1", "S2", "S3", "S4", "S5"];
+    const STATE_ORDER = ["S0", "S1", "S2", "S3", "S4", "S5", "S6"];
+    const TOOL_LABELS = { "career_scan": "职业情报扫描", "scenario": "情境模拟", "dispatch_task": "实战任务派发" };
 
     let sessionId = localStorage.getItem("zhitu_sid");
     if (!sessionId) {
@@ -323,7 +325,7 @@
 
     function handleResult(r) {
       if (r.error) { append("sys", r.error); return; }
-      const tool = (r.tools_used && r.tools_used.length) ? r.tools_used.join("、") : null;
+      const tool = (r.tools_used && r.tools_used.length) ? r.tools_used.map(function (t) { return TOOL_LABELS[t] || t; }).join("、") : null;
       if (r.pre_reply) {
         append("assistant", r.pre_reply, tool);
         append("assistant", r.reply);
