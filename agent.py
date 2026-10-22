@@ -449,11 +449,14 @@ def collect_datasource(kb, tool, result):
         n = result.get("career")
         if n:
             names = [n]
+    authority = None
     sources, confidences = [], []
     careers = kb.get("careers", []) if isinstance(kb, dict) else []
     for name in names:
         for c in careers:
             if c.get("name") == name:
+                if authority is None and isinstance(c.get("authority_base"), dict):
+                    authority = c["authority_base"]
                 s = (c.get("source") or "").strip()
                 cf = (c.get("confidence") or "").strip()
                 if s:
@@ -464,6 +467,7 @@ def collect_datasource(kb, tool, result):
     return {
         "tool": tool,
         "careers": names,
+        "authority": authority,
         "source": "；".join(_uniq(sources)) or "待标注",
         "confidence": "；".join(_uniq(confidences)) or "待标注",
     }

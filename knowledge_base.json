@@ -1,9 +1,14 @@
 {
-  "_说明": "知识库：从业者访谈后填入。字段说明：name=职业名（career_scan 与 scenario 必须一字不差一致）；interest_cluster=兴趣簇，只能从固定词表选：分析机制型/表达创造型/助人服务型/动手实践型/商业经营型；one_day_log=一日工作日志（数组，time+scene）；facts=职业关键事实（待遇/门槛/压力等，供 Agent 引用）；scenario.rounds=3~4 轮决策剧本（situation/question/guidance/interpret_hints，开放式不设选项）；tasks=实战任务链（title/instruction/report/interpret_hints，一次派一个）；major_path=专业与先修路径；source=数据来源标注；confidence=已验证 | 合成内容待验证。",
+  "_说明": "知识库：从业者访谈后填入。字段说明：name=职业名（career_scan 与 scenario 必须一字不差一致）；interest_cluster=兴趣簇，只能从固定词表选：分析机制型/表达创造型/助人服务型/动手实践型/商业经营型；authority_base=第一层权威底座（classification=分类归属、main_tasks=主要工作任务、source=权威来源）；one_day_log=一日工作日志（数组，time+scene）；facts=职业关键事实（待遇/门槛/压力等，供 Agent 引用）；scenario.rounds=3~4 轮决策剧本（situation/question/guidance/interpret_hints，开放式不设选项）；tasks=实战任务链（title/instruction/report/interpret_hints，一次派一个）；major_path=专业与先修路径；source=第二层体验内容来源标注；confidence=已验证 | 合成内容待验证。",
   "careers": [
     {
       "name": "大学教师（文科）",
       "interest_cluster": "表达创造型",
+      "authority_base": {
+        "classification": "专业技术人员 → 教育人员 → 高等教育人员",
+        "main_tasks": "讲授、辅导课程并批改作业、组织考试；指导课程设计、毕业设计与毕业论文；组织、指导实习与社会实践；开展科学研究、撰写学术论文；承担学生思想政治工作与教学管理。",
+        "source": "《中华人民共和国职业分类大典（2022年版）》"
+      },
       "one_day_log": [
         {"time": "08:00", "scene": "到教研室，先处理邮件和系统填报、评估材料"},
         {"time": "09:00", "scene": "上课，讲专业核心课"},
