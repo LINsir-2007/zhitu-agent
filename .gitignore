@@ -1,0 +1,14 @@
+# 本机密钥文件，切勿提交到 Git
+config.json
+
+# Python
+__pycache__/
+*.pyc
+
+# 虚拟环境
+.venv/
+venv/
+
+# 系统
+.DS_Store
+Thumbs.db

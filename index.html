@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>职途探照灯 · 高中生AI生涯探索智能体</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: #eef1f6; color: #1f2430; height: 100vh;
+    display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 22px; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo { font-size: 30px; }
+  .brand h1 { font-size: 20px; font-weight: 700; }
+  .brand p { font-size: 12px; color: #8a8f98; margin-top: 2px; }
+  button { cursor: pointer; border: none; border-radius: 8px; padding: 9px 14px; font-size: 14px; }
+  #resetBtn { background: #f2f4f8; color: #4a5160; }
+  #resetBtn:hover { background: #e6e9ef; }
+
+  .statusbar {
+    display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 22px;
+    background: #fff; border-bottom: 1px solid #eef0f4;
+  }
+  .stat { background: #f4f6fa; border-radius: 8px; padding: 6px 12px; font-size: 12px; }
+  .stat .k { color: #8a8f98; margin-right: 6px; }
+  .stat .v { font-weight: 600; }
+  #statState { color: #3b5bdb; }
+
+  .evidence { margin: 10px 22px 0; background: #fff; border: 1px solid #e7eaf1; border-radius: 10px; padding: 12px 14px; }
+  .evidence.hidden { display: none; }
+  .evidence-title { font-size: 12px; color: #8a8f98; margin-bottom: 8px; }
+  #evidenceList { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
+  #evidenceList li { background: #f4f6fa; border-radius: 6px; padding: 4px 8px; font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  .tag { background: #3b5bdb; color: #fff; border-radius: 4px; padding: 1px 6px; font-size: 11px; flex-shrink: 0; }
+  .w { color: #b0b4bc; font-size: 11px; flex-shrink: 0; }
+
+  main#chat { flex: 1; overflow-y: auto; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
+  .msg { display: flex; }
+  .msg.assistant { justify-content: flex-start; }
+  .msg.user { justify-content: flex-end; }
+  .msg.sys { justify-content: center; }
+  .bubble {
+    max-width: 72%; padding: 11px 14px; border-radius: 14px;
+    font-size: 14px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
+  }
+  .msg.assistant .bubble { background: #fff; border: 1px solid #eceef3; border-bottom-left-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .msg.user .bubble { background: #3b5bdb; color: #fff; border-bottom-right-radius: 4px; }
+  .msg.sys .bubble { background: #fff3e0; color: #9a6b1f; font-size: 13px; border-radius: 8px; }
+  .toolbadge { font-size: 11px; color: #3b5bdb; margin-bottom: 6px; font-weight: 600; }
+
+  footer { display: flex; gap: 10px; padding: 14px 22px; background: #fff; border-top: 1px solid #eef0f4; }
+  #input { flex: 1; border: 1px solid #e2e6ee; border-radius: 10px; padding: 12px 14px; font-size: 14px; }
+  #input:focus { outline: none; border-color: #3b5bdb; }
+  #sendBtn { background: #3b5bdb; color: #fff; padding: 0 22px; font-size: 15px; font-weight: 600; }
+  #sendBtn:hover { background: #2f49b5; }
+  #sendBtn:disabled { background: #aab4e8; cursor: not-allowed; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="logo">🔦</div>
+      <div>
+        <h1>职途探照灯</h1>
+        <p>高中生 AI 生涯探索智能体 · 让 AI 赋能教育</p>
+      </div>
+    </div>
+    <button id="resetBtn">↺ 重新开始</button>
+  </header>
+
+  <div class="statusbar">
+    <div class="stat"><span class="k">当前状态</span><span class="v" id="statState">S0 破冰与证据采集</span></div>
+    <div class="stat"><span class="k">画像成熟度</span><span class="v" id="statMaturity">低</span></div>
+    <div class="stat"><span class="k">兴趣指向</span><span class="v" id="statDirection">模糊</span></div>
+    <div class="stat"><span class="k">探索深度</span><span class="v" id="statDepth">未体验</span></div>
+    <div class="stat"><span class="k">画像证据</span><span class="v" id="statEvidence">0 条</span></div>
+  </div>
+
+  <div id="evidencePanel" class="evidence hidden">
+    <div class="evidence-title">已采集画像证据（引用学生原话）</div>
+    <ul id="evidenceList"></ul>
+  </div>
+
+  <main id="chat"></main>
+
+  <footer>
+    <input id="input" placeholder="说点什么，例如：我好像对心理挺感兴趣的，但不知道具体能干嘛……" autocomplete="off">
+    <button id="sendBtn">发送</button>
+  </footer>
+
+  <script>
+    const STATE_NAMES = {
+      "S0": "S0 破冰与证据采集",
+      "S1": "S1 画像构建",
+      "S2": "S2 职业簇扫描",
+      "S3": "S3 情境模拟",
+      "S4": "S4 行动规划",
+      "S5": "S5 追踪与提醒"
+    };
+
+    let sessionId = localStorage.getItem("zhitu_sid");
+    if (!sessionId) {
+      sessionId = (crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + "" + Math.random());
+      localStorage.setItem("zhitu_sid", sessionId);
+    }
+
+    let accessCode = new URLSearchParams(window.location.search).get("code") || null;
+
+    const chat = document.getElementById("chat");
+    const input = document.getElementById("input");
+    const sendBtn = document.getElementById("sendBtn");
+
+    async function call(method, path, payload) {
+      const res = await fetch(path, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: payload !== undefined ? JSON.stringify(payload) : undefined
+      });
+      return res.json();
+    }
+
+    async function chatRequest(message) {
+      let r = await call("POST", "/api/chat", { session_id: sessionId, message, access_code: accessCode });
+      if (r && r.code === "auth_required") {
+        const code = prompt("此链接需要访问码，请输入：");
+        if (code) {
+          accessCode = code.trim();
+          r = await call("POST", "/api/chat", { session_id: sessionId, message, access_code: accessCode });
+        } else {
+          append("sys", r.error || "需要访问码才能使用。");
+        }
+      }
+      return r;
+    }
+
+    function append(role, text, tool) {
+      if (!text) return;
+      const row = document.createElement("div");
+      row.className = "msg " + role;
+      const bub = document.createElement("div");
+      bub.className = "bubble";
+      if (tool) {
+        const badge = document.createElement("div");
+        badge.className = "toolbadge";
+        badge.textContent = "🔧 调用工具：" + tool;
+        bub.appendChild(badge);
+      }
+      const p = document.createElement("div");
+      p.className = "text";
+      p.textContent = text;
+      bub.appendChild(p);
+      row.appendChild(bub);
+      chat.appendChild(row);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function updateStatus(status) {
+      status = status || {};
+      document.getElementById("statState").textContent = STATE_NAMES[status.state] || status.state || "-";
+      const p = status.portrait || {};
+      document.getElementById("statMaturity").textContent = p.self_portrait_maturity || "-";
+      document.getElementById("statDirection").textContent = p.career_interest_direction || "-";
+      document.getElementById("statDepth").textContent = p.exploration_depth || "-";
+      document.getElementById("statEvidence").textContent = (status.evidence_count || 0) + " 条";
+      renderEvidence(status.evidence || []);
+    }
+
+    function renderEvidence(list) {
+      const panel = document.getElementById("evidencePanel");
+      const ul = document.getElementById("evidenceList");
+      ul.innerHTML = "";
+      if (!list || !list.length) { panel.classList.add("hidden"); return; }
+      panel.classList.remove("hidden");
+      list.forEach(function (e) {
+        const li = document.createElement("li");
+        const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = e.dimension;
+        const q = document.createElement("span"); q.className = "q"; q.textContent = "“" + e.quote + "”";
+        const w = document.createElement("span"); w.className = "w"; w.textContent = e.weight;
+        li.appendChild(tag); li.appendChild(q); li.appendChild(w);
+        ul.appendChild(li);
+      });
+    }
+
+    function handleResult(r) {
+      if (r.error) { append("sys", r.error); return; }
+      const tool = (r.tools_used && r.tools_used.length) ? r.tools_used.join("、") : null;
+      if (r.pre_reply) {
+        append("assistant", r.pre_reply, tool);
+        append("assistant", r.reply);
+      } else {
+        append("assistant", r.reply, tool);
+      }
+      updateStatus(r.status);
+    }
+
+    async function send() {
+      const text = input.value.trim();
+      if (!text) return;
+      append("user", text);
+      input.value = "";
+      sendBtn.disabled = true;
+      try {
+        const r = await chatRequest(text);
+        handleResult(r);
+      } catch (err) {
+        append("sys", "网络错误：" + err + "。请稍后重试。");
+      } finally {
+        sendBtn.disabled = false;
+        input.focus();
+      }
+    }
+
+    async function opening() {
+      try {
+        const r = await chatRequest("");
+        handleResult(r);
+      } catch (err) {
+        append("sys", "无法连接服务，请稍后刷新页面重试。");
+      }
+    }
+
+    async function reset() {
+      try { await call("POST", "/api/reset", { session_id: sessionId, access_code: accessCode }); } catch (e) {}
+      chat.innerHTML = "";
+      updateStatus({ state: "S0", portrait: { self_portrait_maturity: "低", career_interest_direction: "模糊", exploration_depth: "未体验" }, evidence_count: 0, evidence: [] });
+      opening();
+    }
+
+    sendBtn.addEventListener("click", send);
+    input.addEventListener("keydown", function (e) { if (e.key === "Enter") send(); });
+    document.getElementById("resetBtn").addEventListener("click", reset);
+
+    opening();
+  </script>
+</body>
+</html>
