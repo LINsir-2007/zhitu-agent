@@ -98,6 +98,12 @@
   .msg.user .bubble { background: linear-gradient(120deg, #5b6bf5, #7c5cf0); color: #fff; border-bottom-right-radius: 5px; }
   .msg.sys .bubble { background: #fff3e0; color: #9a6b1f; font-size: 13px; border-radius: 10px; }
   .toolbadge { font-size: 11px; color: #5b6bf5; margin-bottom: 6px; font-weight: 700; }
+  .reminder { border-left: 3px solid #f2a24c; background: #fffaf4; }
+  .reminder-btn {
+    display: inline-block; margin-top: 8px; font-size: 13px; font-weight: 600;
+    background: #f2a24c; color: #fff; border: none; border-radius: 8px; padding: 7px 14px; cursor: pointer;
+  }
+  .reminder-btn:hover { background: #e08f38; }
 
   .typing span { display: inline-block; width: 7px; height: 7px; margin: 0 2px; background: #b6bcd0; border-radius: 50%; animation: blink 1.2s infinite; }
   .typing span:nth-child(2) { animation-delay: .2s; }
@@ -325,6 +331,70 @@
       addLine("第二层·体验内容：", ds.source || "待标注");
     }
 
+    function buildICS(task) {
+      const dueDays = parseInt(task.due_days, 10) || 7;
+      const now = new Date();
+      const due = new Date(now.getTime() + dueDays * 24 * 3600 * 1000);
+      const end = new Date(due.getTime() + 3600 * 1000);
+      const fmt = function (d) {
+        return d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+      };
+      const title = task.title || "生涯探索任务";
+      const desc = (task.instruction || "").replace(/\\/g, "\\\\").replace(/\n/g, "\\n");
+      const ics = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Zhitu Career//Task Reminder//CN",
+        "BEGIN:VEVENT",
+        "UID:" + Date.now() + "@zhitu-career",
+        "DTSTAMP:" + fmt(now),
+        "DTSTART:" + fmt(due),
+        "DTEND:" + fmt(end),
+        "SUMMARY:" + title,
+        "DESCRIPTION:" + desc,
+        "BEGIN:VALARM",
+        "ACTION:DISPLAY",
+        "DESCRIPTION:" + title,
+        "TRIGGER:-PT24H",
+        "END:VALARM",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ].join("\r\n");
+      return ics;
+    }
+
+    function downloadICS(task) {
+      const ics = buildICS(task);
+      const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = (task.title || "生涯探索任务") + ".ics";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function appendReminder(task) {
+      const row = document.createElement("div");
+      row.className = "msg assistant";
+      const bub = document.createElement("div");
+      bub.className = "bubble reminder";
+      const p = document.createElement("div");
+      p.className = "text";
+      p.textContent = "⏰ 任务「" + (task.title || "") + "」已记录。点击下方按钮，可一键加入你的日历并设置提醒：";
+      const btn = document.createElement("button");
+      btn.className = "reminder-btn";
+      btn.textContent = "📅 添加到日历";
+      btn.onclick = function () { downloadICS(task); };
+      bub.appendChild(p);
+      bub.appendChild(btn);
+      row.appendChild(bub);
+      chat.appendChild(row);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
     function handleResult(r) {
       if (r.error) { append("sys", r.error); return; }
       const tool = (r.tools_used && r.tools_used.length) ? r.tools_used.map(function (t) { return TOOL_LABELS[t] || t; }).join("、") : null;
@@ -336,6 +406,7 @@
       }
       updateStatus(r.status);
       renderDatasource(r.datasource);
+      if (r.task) { appendReminder(r.task); }
     }
 
     async function send(text) {

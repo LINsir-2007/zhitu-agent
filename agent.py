@@ -101,7 +101,7 @@ SYSTEM_PROMPT = """# 角色
 - S2 职业簇扫描：调用 career_scan 呈现 3~5 个方向。→ 学生选定一个方向并表达"想试试"进入 S3；若学生看后仍无倾向，回退 S1 继续追问。
 - S3 情境模拟：调用 scenario，逐轮呈现一个真实情境 + 一句思考建议，让学生自由表达自己会怎么做（不设选项、不列 ABCD）。→ 学生回答后，用 interpret_hints 温和反馈"你更看重什么、说明偏向哪种工作方式"，不做对错评判。跑完轮数即结束进入 S4；学生中途明确"不想继续"也进入 S4（需记录原因）。
 - S4 行动规划：生成可执行、可追踪的高中阶段探索计划。→ 学生确认计划后进入 S5。
-- S5 任务派发（实战任务）：调用 dispatch_task，给学生派一个真实世界的小任务，让他去做、再回来汇报。→ 学生汇报后，你解读反馈、再派下一个任务（S5 内循环）；任务全部完成或学生明确想收尾 → 进入 S6。
+- S5 任务派发（实战任务）：调用 dispatch_task，给学生派一个真实世界的小任务，让他去做、再回来汇报。→ 学生汇报后，你解读反馈、再派下一个任务（S5 内循环）；任务全部完成或学生明确想收尾 → 进入 S6。派发任务后，主动询问学生是否需要设置日历提醒（经学生同意后由界面提供"添加到日历"按钮）。
 - S6 追踪与提醒：按时间节点提醒，按反馈调整。→ 可回 S2 / S3 / S5。
 
 ## 工具与状态的一致性（强约束）
@@ -131,8 +131,9 @@ SYSTEM_PROMPT = """# 角色
 ## tool: dispatch_task
 - 用途：派发真实世界的生涯探索小任务（实战任务），一次只派一个
 - 参数：{"career": "职业名称", "task_index": 从 0 开始的任务序号}
-- 每任务结构：title（任务名）、instruction（要做什么）、report（回来后要汇报什么）、interpret_hints（供你解读汇报的参考）
+- 每任务结构：title（任务名）、instruction（要做什么）、report（回来后要汇报什么）、interpret_hints（供你解读汇报的参考）、due_days（建议完成天数）
 - 交互方式：呈现 instruction，让学生去真实世界完成、再回来汇报；学生汇报后，依据 interpret_hints 解读"他的感受说明什么"，再派下一个任务（task_index 递增）
+- 提醒：派发任务后主动询问学生是否需要设置日历提醒，经同意后由界面提供"添加到日历"按钮（生成 .ics 文件）
 - 可调时机：S4 或 S5
 
 # 输出要求
@@ -486,6 +487,7 @@ def run_chat(session, text, api_key=None):
     tools_used = []
     reply = None
     datasource = None
+    dispatched_task = None
     kb = load_kb()
 
     for _ in range(MAX_TOOL_CALLS_PER_TURN):
@@ -497,6 +499,13 @@ def run_chat(session, text, api_key=None):
             if pre_reply is None:
                 pre_reply = parsed.get("reply") or ""
             result = execute_tool(kb, parsed["tool_call"])
+            if tool == "dispatch_task" and isinstance(result.get("task"), dict):
+                t = result["task"]
+                dispatched_task = {
+                    "title": t.get("title", ""),
+                    "instruction": t.get("instruction", ""),
+                    "due_days": t.get("due_days", 7),
+                }
             datasource = collect_datasource(kb, tool, result)
             session["messages"].append(tool_result_message(result, session["state"]))
             continue
@@ -510,6 +519,7 @@ def run_chat(session, text, api_key=None):
         "pre_reply": pre_reply,
         "tools_used": tools_used,
         "datasource": datasource,
+        "task": dispatched_task,
         "status": {
             "state": session["state"]["current"],
             "portrait": session["state"]["portrait"],
