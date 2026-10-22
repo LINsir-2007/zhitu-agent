@@ -97,7 +97,7 @@ SYSTEM_PROMPT = """# 角色
 - S0 破冰与行为证据采集：用具体行为问题采集证据。→ 累计 ≥3 条有效证据进入 S1；若已连续追问 3 轮以上仍未满 3 条，只要有 ≥1 条也可进入 S1（避免卡死）。
 - S1 画像构建：追问矛盾点，形成结构化画像。→ 成熟度达到"中"且兴趣指向≠模糊，进入 S2。
 - S2 职业簇扫描：调用 career_scan 呈现 3~5 个方向。→ 学生选定一个方向并表达"想试试"进入 S3；若学生看后仍无倾向，回退 S1 继续追问。
-- S3 情境模拟：调用 scenario 生成 3~4 轮决策剧本。→ 跑完轮数即结束进入 S4；学生中途明确"不想继续"也进入 S4（需记录原因）。
+- S3 情境模拟：调用 scenario，逐轮呈现一个真实情境 + 一句思考建议，让学生自由表达自己会怎么做（不设选项、不列 ABCD）。→ 学生回答后，用 interpret_hints 温和反馈"你更看重什么、说明偏向哪种工作方式"，不做对错评判。跑完轮数即结束进入 S4；学生中途明确"不想继续"也进入 S4（需记录原因）。
 - S4 行动规划：生成可执行、可追踪的高中阶段探索计划。→ 学生确认进入 S5。
 - S5 追踪与提醒：按时间节点提醒，按反馈调整。→ 可回 S2 或 S3。
 
@@ -118,8 +118,10 @@ SYSTEM_PROMPT = """# 角色
 - 兴趣簇只能从固定词表中选择（任选其一，不要自造）：分析机制型 / 表达创造型 / 助人服务型 / 动手实践型 / 商业经营型
 - 可调时机：S1 或 S2
 ## tool: scenario
-- 用途：生成 3~4 轮职业决策剧本，逐轮交互
+- 用途：生成 3~4 轮职业决策剧本，逐轮交互（开放式，不设选择题）
 - 参数：{"career": "职业名称", "rounds": 3~4}
+- 每轮结构：situation（情境）、question（要思考的问题）、guidance（给学生的思考建议）、interpret_hints（供你解读自由回答的参考）
+- 交互方式：呈现 situation 和 guidance，让学生自由回答；学生答完后，依据 interpret_hints 反馈"你更看重 X，说明你偏向 X 型工作方式"，绝不设对错、不列选项
 - 可调时机：S2 或 S3
 
 # 输出要求
@@ -366,6 +368,121 @@ def run_one_turn(api_key, messages, state):
 def print_status_line(state):
     p = state["portrait"]
     print(f"[状态] 当前 {state['current']} | 画像 {p['self_portrait_maturity']}/{p['career_interest_direction']}/{p['exploration_depth']} | 证据 {len(state['evidence'])} 条")
+
+
+# ---------------------------------------------------------------------------
+# 共享：会话 / 整轮对话 / 数据来源（供 server.py 与 app.py 复用）
+# ---------------------------------------------------------------------------
+def load_api_key_env_or_config():
+    key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    if key:
+        return key
+    cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+    if os.path.exists(cfg_path):
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            k = (cfg.get("api_key") or "").strip()
+            if k:
+                return k
+        except Exception:
+            pass
+    return ""
+
+
+def new_session():
+    return {
+        "messages": [{"role": "system", "content": SYSTEM_PROMPT}],
+        "state": {
+            "current": "S0",
+            "portrait": {"self_portrait_maturity": "低", "career_interest_direction": "模糊", "exploration_depth": "未体验"},
+            "evidence": [],
+            "s0_rounds": 0,
+        },
+    }
+
+
+def _uniq(seq):
+    seen, out = set(), []
+    for x in seq:
+        if x and x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+def collect_datasource(kb, tool, result):
+    names = []
+    if tool == "career_scan":
+        names = [c.get("name") for c in result.get("results", []) if c.get("name")]
+    elif tool == "scenario":
+        n = result.get("career")
+        if n:
+            names = [n]
+    sources, confidences = [], []
+    careers = kb.get("careers", []) if isinstance(kb, dict) else []
+    for name in names:
+        for c in careers:
+            if c.get("name") == name:
+                s = (c.get("source") or "").strip()
+                cf = (c.get("confidence") or "").strip()
+                if s:
+                    sources.append(s)
+                if cf:
+                    confidences.append(cf)
+                break
+    return {
+        "tool": tool,
+        "careers": names,
+        "source": "；".join(_uniq(sources)) or "待标注",
+        "confidence": "；".join(_uniq(confidences)) or "待标注",
+    }
+
+
+def run_chat(session, text, api_key=None):
+    if api_key is None:
+        api_key = load_api_key_env_or_config()
+    if not api_key:
+        return {"error": "服务端未配置 DEEPSEEK_API_KEY。"}
+
+    text = text or "（这是开场，请从 S0 破冰开始）"
+    session["messages"].append({"role": "user", "content": build_user_message(text, session["state"])})
+
+    pre_reply = None
+    tools_used = []
+    reply = None
+    datasource = None
+    kb = load_kb()
+
+    for _ in range(MAX_TOOL_CALLS_PER_TURN):
+        parsed = run_one_turn(api_key, session["messages"], session["state"])
+        session["messages"].append({"role": "assistant", "content": json.dumps(parsed, ensure_ascii=False)})
+        if parsed.get("tool_call"):
+            tool = parsed["tool_call"].get("tool")
+            tools_used.append(tool)
+            if pre_reply is None:
+                pre_reply = parsed.get("reply") or ""
+            result = execute_tool(kb, parsed["tool_call"])
+            datasource = collect_datasource(kb, tool, result)
+            session["messages"].append(tool_result_message(result, session["state"]))
+            continue
+        reply = parsed.get("reply") or ""
+        break
+    else:
+        reply = "（本轮工具调用次数过多，请重新描述一下你的想法。）"
+
+    return {
+        "reply": reply,
+        "pre_reply": pre_reply,
+        "tools_used": tools_used,
+        "datasource": datasource,
+        "status": {
+            "state": session["state"]["current"],
+            "portrait": session["state"]["portrait"],
+            "evidence_count": len(session["state"]["evidence"]),
+            "evidence": session["state"]["evidence"],
+        },
+    }
 
 
 # ---------------------------------------------------------------------------

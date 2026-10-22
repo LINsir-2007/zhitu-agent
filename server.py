@@ -20,85 +20,14 @@ PORT = int(os.environ.get("ZHITU_PORT", "8787"))
 HOST = os.environ.get("ZHITU_HOST", "0.0.0.0")
 
 
-def load_api_key():
-    """每次请求都重新读取，方便你把 Key 填进 config.json 后直接刷新页面即可生效。"""
-    key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-    if key:
-        return key
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            k = (cfg.get("api_key") or "").strip()
-            if k:
-                return k
-        except Exception:
-            pass
-    return ""
-
-
-class Session:
-    def __init__(self):
-        self.messages = [{"role": "system", "content": agent.SYSTEM_PROMPT}]
-        self.state = {
-            "current": "S0",
-            "portrait": {"self_portrait_maturity": "低", "career_interest_direction": "模糊", "exploration_depth": "未体验"},
-            "evidence": [],
-            "s0_rounds": 0,
-        }
-
-
 SESSIONS = {}
 
 
 def get_session(sid):
     sid = sid or "default"
     if sid not in SESSIONS:
-        SESSIONS[sid] = Session()
+        SESSIONS[sid] = agent.new_session()
     return SESSIONS[sid]
-
-
-def run_chat(session, text):
-    api_key = load_api_key()
-    if not api_key:
-        return {
-            "error": "尚未配置 DeepSeek API Key：请打开 zhitu-agent/config.json，把你的 Key 填进 api_key 字段（本机文件，不会上传），然后刷新页面重试。"
-        }
-
-    text = text or "（这是开场，请从 S0 破冰开始）"
-    session.messages.append({"role": "user", "content": agent.build_user_message(text, session.state)})
-
-    pre_reply = None
-    tools_used = []
-    reply = None
-    kb = agent.load_kb()
-
-    for _ in range(agent.MAX_TOOL_CALLS_PER_TURN):
-        parsed = agent.run_one_turn(api_key, session.messages, session.state)
-        session.messages.append({"role": "assistant", "content": json.dumps(parsed, ensure_ascii=False)})
-        if parsed.get("tool_call"):
-            tools_used.append(parsed["tool_call"].get("tool"))
-            if pre_reply is None:
-                pre_reply = parsed.get("reply") or ""
-            result = agent.execute_tool(kb, parsed["tool_call"])
-            session.messages.append(agent.tool_result_message(result, session.state))
-            continue
-        reply = parsed.get("reply") or ""
-        break
-    else:
-        reply = "（本轮工具调用次数过多，请重新描述一下你的想法。）"
-
-    return {
-        "reply": reply,
-        "pre_reply": pre_reply,
-        "tools_used": tools_used,
-        "status": {
-            "state": session.state["current"],
-            "portrait": session.state["portrait"],
-            "evidence_count": len(session.state["evidence"]),
-            "evidence": session.state["evidence"],
-        },
-    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -140,7 +69,7 @@ class Handler(BaseHTTPRequestHandler):
             body = self._read_json()
             sess = get_session(body.get("session_id"))
             try:
-                result = run_chat(sess, body.get("message"))
+                result = agent.run_chat(sess, body.get("message"))
             except Exception as e:
                 result = {"error": f"服务端出错：{e}"}
             self._send(200, json.dumps(result, ensure_ascii=False))

@@ -25,77 +25,11 @@ ACCESS_CODE = os.environ.get("ACCESS_CODE", "2026").strip()
 SESSIONS = {}
 
 
-def load_api_key():
-    key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-    if key:
-        return key
-    cfg_path = os.path.join(BASE_DIR, "config.json")
-    if os.path.exists(cfg_path):
-        try:
-            with open(cfg_path, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            k = (cfg.get("api_key") or "").strip()
-            if k:
-                return k
-        except Exception:
-            pass
-    return ""
-
-
 def get_session(sid):
     sid = sid or "default"
     if sid not in SESSIONS:
-        SESSIONS[sid] = {
-            "messages": [{"role": "system", "content": agent.SYSTEM_PROMPT}],
-            "state": {
-                "current": "S0",
-                "portrait": {"self_portrait_maturity": "低", "career_interest_direction": "模糊", "exploration_depth": "未体验"},
-                "evidence": [],
-                "s0_rounds": 0,
-            },
-        }
+        SESSIONS[sid] = agent.new_session()
     return SESSIONS[sid]
-
-
-def run_chat(session, text):
-    api_key = load_api_key()
-    if not api_key:
-        return {"error": "服务端未配置 DEEPSEEK_API_KEY。"}
-
-    text = text or "（这是开场，请从 S0 破冰开始）"
-    session["messages"].append({"role": "user", "content": agent.build_user_message(text, session["state"])})
-
-    pre_reply = None
-    tools_used = []
-    reply = None
-    kb = agent.load_kb()
-
-    for _ in range(agent.MAX_TOOL_CALLS_PER_TURN):
-        parsed = agent.run_one_turn(api_key, session["messages"], session["state"])
-        session["messages"].append({"role": "assistant", "content": json.dumps(parsed, ensure_ascii=False)})
-        if parsed.get("tool_call"):
-            tools_used.append(parsed["tool_call"].get("tool"))
-            if pre_reply is None:
-                pre_reply = parsed.get("reply") or ""
-            result = agent.execute_tool(kb, parsed["tool_call"])
-            session["messages"].append(agent.tool_result_message(result, session["state"]))
-            continue
-        reply = parsed.get("reply") or ""
-        break
-    else:
-        reply = "（本轮工具调用次数过多，请重新描述一下你的想法。）"
-
-    return {
-        "reply": reply,
-        "pre_reply": pre_reply,
-        "tools_used": tools_used,
-        "status": {
-            "state": session["state"]["current"],
-            "portrait": session["state"]["portrait"],
-            "evidence_count": len(session["state"]["evidence"]),
-            "evidence": session["state"]["evidence"],
-        },
-    }
 
 
 def _check_access(body):
@@ -118,7 +52,7 @@ def api_chat():
         return denied
     sess = get_session(body.get("session_id"))
     try:
-        result = run_chat(sess, body.get("message"))
+        result = agent.run_chat(sess, body.get("message"))
     except Exception as e:
         result = {"error": f"服务端出错：{e}"}
     return jsonify(result)
